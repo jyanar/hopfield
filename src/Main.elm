@@ -3,18 +3,20 @@ module Main exposing (main)
 import Browser
 import Html exposing (Html, button, div, text, table, tr, td)
 import Html.Attributes exposing (style)
-import Html.Events exposing (onClick)
+import Html.Events exposing (onClick, onMouseUp, onMouseDown, onMouseEnter)
 
 import Random
+import Time
+import Platform.Cmd as Cmd
 
 
 numRows : Int
 numRows =
-    4
+    28
 
 numCols : Int
 numCols =
-    4
+    28
 
 numUnits : Int
 numUnits =
@@ -29,29 +31,28 @@ type UnitState
 main : Program () Model Msg
 main =
     Browser.element
-        { init = initialModel
+        { init = init
         , view = view
         , update = update
         , subscriptions = subscriptions
         }
 
 
-subscriptions : Model -> Sub Msg
-subscriptions _ =
-  Sub.none
-
-
 type alias Model =
     { state : List UnitState          -- The state of the Hopfield network
     , weights : List (List Int)       -- The weight matrix T
     , mems : List (List UnitState)    -- List of memories
+    , playing : Bool                  -- Whether to simulate the network forward
+    , drawing : Bool
     }
 
-initialModel : () -> (Model, Cmd Msg)
-initialModel _ =
+init : () -> (Model, Cmd Msg)
+init _ =
     ( { state = List.repeat numUnits Off
       , weights = chunk numUnits (List.repeat (numUnits * numUnits) 0)
       , mems = []
+      , playing = False
+      , drawing = False
       }
     , Cmd.none
     )
@@ -64,6 +65,24 @@ type Msg
     | ToggleAt Int
     | UpdateAt Int
     | UpdateRequest
+    | Play
+    | Pause
+    | Xor
+    | StartDrawing Int
+    | DrawAt Int
+    | StopDrawing
+
+
+tickDt : Float
+tickDt =
+    25.0
+
+subscriptions : Model -> Sub Msg
+subscriptions model =
+    if model.playing then
+        Time.every tickDt (\_ -> UpdateRequest)
+    else
+        Sub.none
 
 
 update : Msg -> Model -> (Model, Cmd Msg)
@@ -100,6 +119,40 @@ update msg model =
             , Random.generate UpdateAt (Random.int 0 (numUnits - 1))
             )
 
+        Play ->
+            ({ model | playing = True }
+            , Cmd.none
+            )
+
+        Pause ->
+            ({ model | playing = False }
+            , Cmd.none
+            )
+
+        Xor ->
+            ({ model | state = List.map flip model.state}
+            , Cmd.none
+            )
+
+        StartDrawing idx ->
+            ({ model | state = (turnOnAt idx model.state), drawing = True }
+            , Cmd.none
+            )
+
+        DrawAt idx ->
+            if model.drawing then
+                ({ model | state = turnOnAt idx model.state }
+                , Cmd.none
+                )
+            else
+                (model , Cmd.none)
+
+        StopDrawing ->
+            ({ model | drawing = False }
+            , Cmd.none
+            )
+
+
 
 getAt : Int -> List a -> Maybe a
 getAt idx list =
@@ -117,6 +170,10 @@ flip b =
 toggleAt : Int -> List UnitState -> List UnitState
 toggleAt idx state =
     List.indexedMap (\i b -> if i == idx then flip b else b) state
+
+turnOnAt : Int -> List UnitState -> List UnitState
+turnOnAt idx state =
+    List.indexedMap (\i b -> if i == idx then On else b) state
 
 
 outerProduct : List Int -> List Int -> List (List Int)
@@ -239,11 +296,14 @@ view : Model -> Html Msg
 view model =
     div []
         [ viewGrid model.state
-        , button [ onClick UpdateRequest ] [ text "Step"  ]
+        , button [ onClick UpdateRequest ] [ text "Step" ]
         , button [ onClick Clear ] [ text "Clear" ]
         , button [ onClick Store ] [ text "Store" ]
+        , button [ onClick Play  ] [ text "Play"  ]
+        , button [ onClick Pause ] [ text "Pause" ]
+        , button [ onClick Xor   ] [ text "XOR"   ]
         , div [] [ text ("Memories: " ++ String.fromInt (List.length model.mems)) ]
-        , viewMatrix model.weights
+        -- , viewMatrix model.weights
         -- , div [] [ text ("Length of state: " ++ String.fromInt (List.length model.state))]
         -- , div [] [ text ("Length of mem[1]: " ++ String.fromInt (List.length (Maybe.withDefault [] (List.head model.mems))))]
         -- , div [] [ text ("Mem 1: " ++ (model.mems
@@ -265,8 +325,11 @@ viewCell idx val =
         , style "height" cellSize
         , style "border" "1px solid #ccc"
         , style "background-color" bgColor
-        , style "cursor" "pointer"
-        , onClick (ToggleAt idx)
+        -- , style "cursor" "pointer"
+        -- , onClick (ToggleAt idx)
+        , onMouseDown (StartDrawing idx)
+        , onMouseEnter (DrawAt idx)
+        , onMouseUp StopDrawing
         ]
         []
 
@@ -274,13 +337,12 @@ viewCell idx val =
 
 viewGrid : List UnitState -> Html Msg
 viewGrid state =
-    state
-        |> List.indexedMap viewCell
-        |> chunk numCols
-        |> List.map (\row ->
-            div [ style "display" "flex" ] row
-           )
-        |> div []
+    div [ onMouseUp StopDrawing ]
+        ( state
+            |> List.indexedMap viewCell
+            |> chunk numCols
+            |> List.map (\row -> div [ style "display" "flex" ] row)
+        )
 
 -- | Turn a List (List Int) into a styled HTML table
 viewMatrix : List (List Int) -> Html msg
