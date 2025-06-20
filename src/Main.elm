@@ -217,28 +217,14 @@ setDiagZero m =
 
 
 -- Switches representation from On/Off to {+1, -1}
-toBipolar : List UnitState -> List Int
-toBipolar state =
-    List.map (\u -> if u == On then 1 else -1) state
+toBipolar : UnitState -> Int
+toBipolar s =
+    if s == On then 1 else -1
 
 -- Switches representation from {+1, -1} to On/Off
-toUnitState : List Int -> List UnitState
-toUnitState state =
-    List.map (\u -> if u == 1 then On else Off) state
-
-
-{- Updates weight matrix T to store current network state
-S via Hebbian rule:
-
-    T = T + \sum_{i,j} S_i * S_j
--}
-updateWeights : List (List Int) -> List UnitState -> List (List Int)
-updateWeights weights state =
-    let
-        deltaWeights = outerProduct (toBipolar state) (toBipolar state)
-        summedWeights = List.map2 (+) (List.concat weights) (List.concat deltaWeights)
-    in
-        setDiagZero (chunk numUnits summedWeights)
+toUnitState : Int -> UnitState
+toUnitState i =
+    if i == 1 then On else Off
 
 
 -- Replace the element at `idx` in a list with `newVal`.
@@ -250,6 +236,25 @@ replaceAt idx newVal =
 getSign : Int -> Int
 getSign x =
     if x >= 0 then 1 else -1
+
+
+dotProduct : List number -> List number -> number
+dotProduct xs ys =
+    List.map2 (*) xs ys |> List.sum
+
+
+{- Updates weight matrix T to store current network state
+S via Hebbian rule:
+
+    T = T + \sum_{i,j} S_i * S_j
+-}
+updateWeights : List (List Int) -> List UnitState -> List (List Int)
+updateWeights weights state =
+    let
+        deltaWeights = outerProduct (List.map toBipolar state) (List.map toBipolar state)
+        summedWeights = List.map2 (+) (List.concat weights) (List.concat deltaWeights)
+    in
+    setDiagZero (chunk numUnits summedWeights)
 
 
 {-| Given
@@ -271,20 +276,16 @@ updateAsync unit weights state =
 
         stateBipolar : List Int
         stateBipolar =
-            toBipolar state
-
-        dotProduct : Int
-        dotProduct =
-            List.map2 (*) row stateBipolar |> List.sum
+            List.map toBipolar state
 
         newUnitState : UnitState
         newUnitState =
-            dotProduct
+            dotProduct row stateBipolar
                 |> getSign
-                |> (\u -> if u > 0 then On else Off)
+                |> toUnitState
     in
-        -- replace only the `unit`th entry
-        replaceAt unit newUnitState state
+    replaceAt unit newUnitState state
+
 
 {- Simultaneously updates all units in the network.  -}
 updateSync : List (List Int) -> List UnitState -> List UnitState
@@ -292,22 +293,13 @@ updateSync weights state =
     let
         stateBipolar : List Int
         stateBipolar =
-            toBipolar state
+            List.map toBipolar state
 
         newStateForRow : List Int -> UnitState
         newStateForRow row =
-            let
-                dotProduct : Int
-                dotProduct =
-                    List.map2 (*) row stateBipolar |> List.sum
-
-                signVal =
-                    getSign dotProduct
-            in
-                if signVal > 0 then
-                    On
-                else
-                    Off
+            dotProduct row stateBipolar
+                |> getSign
+                |> toUnitState
     in
     List.map newStateForRow weights
 
