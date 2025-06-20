@@ -43,7 +43,7 @@ type alias Model =
     , weights : List (List Int)       -- The weight matrix T
     , mems : List (List UnitState)    -- List of memories
     , playing : Bool                  -- Whether to simulate the network forward
-    , drawing : Bool
+    , drawing : Bool                  -- Whether user is currently drawing
     }
 
 init : () -> (Model, Cmd Msg)
@@ -286,6 +286,7 @@ updateAsync unit weights state =
         -- replace only the `unit`th entry
         replaceAt unit newUnitState state
 
+{- Simultaneously updates all units in the network.  -}
 updateSync : List (List Int) -> List UnitState -> List UnitState
 updateSync weights state =
     let
