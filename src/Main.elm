@@ -2,7 +2,7 @@ module Main exposing (main)
 
 import Browser
 import Html exposing (Html, button, div, text, table, tr, td)
-import Html.Attributes exposing (style)
+import Html.Attributes exposing (style, attribute)
 import Html.Events exposing (onClick, onMouseUp, onMouseDown, onMouseEnter)
 
 import Random
@@ -64,23 +64,26 @@ type Msg
     | Store
     | ToggleAt Int
     | UpdateAt Int
-    | UpdateRequest
+    | UpdateRandomUnit
     | Play
     | Pause
     | Xor
     | StartDrawing Int
     | DrawAt Int
     | StopDrawing
+    | FlipAt (List Int)
+    | FlipNBits
+    | SyncStep
 
 
 tickDt : Float
 tickDt =
-    25.0
+    17.0
 
 subscriptions : Model -> Sub Msg
 subscriptions model =
     if model.playing then
-        Time.every tickDt (\_ -> UpdateRequest)
+        Time.every tickDt (\_ -> UpdateRandomUnit)
     else
         Sub.none
 
@@ -114,9 +117,19 @@ update msg model =
             , Cmd.none
             )
 
-        UpdateRequest ->
+        UpdateRandomUnit ->
             ( model
             , Random.generate UpdateAt (Random.int 0 (numUnits - 1))
+            )
+
+        FlipAt idxs ->
+            ({ model | state = (flipBits idxs model.state) }
+            , Cmd.none
+            )
+
+        FlipNBits ->
+            ( model
+            , Random.generate FlipAt (Random.list 30 (Random.int 0 (numUnits - 1)))
             )
 
         Play ->
@@ -152,6 +165,11 @@ update msg model =
             , Cmd.none
             )
 
+        SyncStep ->
+            ({ model | state = updateSync model.weights model.state }
+            , Cmd.none
+            )
+
 
 
 getAt : Int -> List a -> Maybe a
@@ -166,6 +184,9 @@ flip : UnitState -> UnitState
 flip b =
     if b == On then Off else On
 
+flipBits : List Int -> List UnitState -> List UnitState
+flipBits idxs state =
+    List.indexedMap (\i b -> if (List.member i idxs) then flip b else b) state
 
 toggleAt : Int -> List UnitState -> List UnitState
 toggleAt idx state =
@@ -265,6 +286,30 @@ updateAsync unit weights state =
         -- replace only the `unit`th entry
         replaceAt unit newUnitState state
 
+updateSync : List (List Int) -> List UnitState -> List UnitState
+updateSync weights state =
+    let
+        stateBipolar : List Int
+        stateBipolar =
+            toBipolar state
+
+        newStateForRow : List Int -> UnitState
+        newStateForRow row =
+            let
+                dotProduct : Int
+                dotProduct =
+                    List.map2 (*) row stateBipolar |> List.sum
+
+                signVal =
+                    getSign dotProduct
+            in
+                if signVal > 0 then
+                    On
+                else
+                    Off
+    in
+    List.map newStateForRow weights
+
 
 -- Chunk a list into sublists of length `n`.
 chunk : Int -> List a -> List (List a)
@@ -296,12 +341,14 @@ view : Model -> Html Msg
 view model =
     div []
         [ viewGrid model.state
-        , button [ onClick UpdateRequest ] [ text "Step" ]
+        , button [ onClick UpdateRandomUnit ] [ text "Step" ]
         , button [ onClick Clear ] [ text "Clear" ]
         , button [ onClick Store ] [ text "Store" ]
         , button [ onClick Play  ] [ text "Play"  ]
         , button [ onClick Pause ] [ text "Pause" ]
         , button [ onClick Xor   ] [ text "XOR"   ]
+        , button [ onClick FlipNBits ] [ text "FlipBits" ]
+        , button [ onClick SyncStep ] [ text "SyncStep" ]
         , div [] [ text ("Memories: " ++ String.fromInt (List.length model.mems)) ]
         -- , viewMatrix model.weights
         -- , div [] [ text ("Length of state: " ++ String.fromInt (List.length model.state))]
@@ -321,7 +368,9 @@ viewCell idx val =
         bgColor = if val == On then "#000" else "#fff"
     in
     div
-        [ style "width" cellSize
+        [ attribute "draggable" "false"
+        , style "user-select" "none"
+        , style "width" cellSize
         , style "height" cellSize
         , style "border" "1px solid #ccc"
         , style "background-color" bgColor
