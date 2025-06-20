@@ -49,7 +49,7 @@ type alias Model =
 init : () -> (Model, Cmd Msg)
 init _ =
     ( { state = List.repeat numUnits Off
-      , weights = chunk numUnits (List.repeat (numUnits * numUnits) 0)
+      , weights = zeroMatrix numUnits
       , mems = []
       , playing = False
       , drawing = False
@@ -74,6 +74,8 @@ type Msg
     | FlipAt (List Int)
     | FlipNBits
     | SyncStep
+    | Stamp Int    -- Stamp memory i into the network state
+    | ClearMemories
 
 
 tickDt : Float
@@ -170,6 +172,26 @@ update msg model =
             , Cmd.none
             )
 
+        Stamp idx ->
+            let
+                mem = Maybe.withDefault
+                        (List.repeat numUnits Off)
+                        (getAt idx model.mems)
+            in
+            ({ model | state = stampMemory mem model.state }
+            , Cmd.none
+            )
+
+        ClearMemories ->
+            ({ model | mems = []
+                     , weights = zeroMatrix numUnits }
+            , Cmd.none
+            )
+
+
+zeroMatrix : Int -> List (List Int)
+zeroMatrix n =
+    chunk n (List.repeat (n * n) 0)
 
 
 getAt : Int -> List a -> Maybe a
@@ -304,6 +326,11 @@ updateSync weights state =
     List.map newStateForRow weights
 
 
+stampMemory : List UnitState -> List UnitState -> List UnitState
+stampMemory mem state =
+    List.map2 (\m s -> if m == On then On else s) mem state
+
+
 -- Chunk a list into sublists of length `n`.
 chunk : Int -> List a -> List (List a)
 chunk n xs =
@@ -342,7 +369,9 @@ view model =
         , button [ onClick Xor   ] [ text "XOR"   ]
         , button [ onClick FlipNBits ] [ text "FlipBits" ]
         , button [ onClick SyncStep ] [ text "SyncStep" ]
+        , button [ onClick ClearMemories ] [ text "Clear Memories" ]
         , div [] [ text ("Memories: " ++ String.fromInt (List.length model.mems)) ]
+        , viewMemories model.mems
         -- , viewMatrix model.weights
         -- , div [] [ text ("Length of state: " ++ String.fromInt (List.length model.state))]
         -- , div [] [ text ("Length of mem[1]: " ++ String.fromInt (List.length (Maybe.withDefault [] (List.head model.mems))))]
@@ -414,3 +443,53 @@ viewMatCell n =
         [ text (String.fromInt n) ]
 
 
+-- | Render the list of memories side by side
+viewMemories : List (List UnitState) -> Html Msg
+viewMemories mems =
+    div
+      [ style "display" "flex"
+      , style "gap" "8px"
+      , style "margin-top" "1em"
+      ]
+      (List.indexedMap viewMemory mems)
+
+
+-- | Render one memory (a List of UnitState) as a tiny grid
+viewMemory : Int -> List UnitState -> Html Msg
+viewMemory idx mem =
+    let
+        thumbSize =
+            "3px"
+        rows =
+            chunk numCols mem
+
+        rowView : List UnitState -> Html Msg
+        rowView rowStates =
+            div [ style "display" "flex" ]
+                (List.map (viewMemoryCell thumbSize) rowStates)
+    in
+    div
+      [ style "border" "1px solid #ddd"
+      , style "padding" "2px"
+      , style "background" "#f9f9f9"
+      , onClick (Stamp idx)
+      ]
+      (List.map rowView rows)
+
+
+-- | Render one “pixel” of a memory thumbnail
+viewMemoryCell : String -> UnitState -> Html Msg
+viewMemoryCell size state =
+    let
+        bg =
+            case state of
+              On  -> "#000"
+              Off -> "#fff"
+    in
+    div
+      [ style "width" size
+      , style "height" size
+      , style "background-color" bg
+    --   , style "border" "1px solid #ccc"
+      ]
+      []
