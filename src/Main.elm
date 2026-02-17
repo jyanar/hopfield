@@ -41,6 +41,11 @@ type UnitState
     | Off
 
 
+type DrawMode
+    = Paint
+    | Erase
+
+
 main : Program () Model Msg
 main =
     Browser.element
@@ -57,6 +62,7 @@ type alias Model =
     , mems : List (List UnitState)    -- List of memories
     , playing : Bool                  -- Whether to simulate the network forward
     , drawing : Bool                  -- Whether user is currently drawing
+    , drawMode : DrawMode             -- Paint (turn on) or Erase (turn off)
     , gridSize : GridSize             -- Current grid dimensions
     }
 
@@ -71,6 +77,7 @@ init _ =
       , mems = []
       , playing = False
       , drawing = False
+      , drawMode = Paint
       , gridSize = gs
       }
     , Cmd.none
@@ -96,6 +103,7 @@ type Msg
     | Stamp Int    -- Stamp memory i into the network state
     | ClearMemories
     | Resize GridSize
+    | ToggleDrawMode
 
 
 tickDt : Float
@@ -174,13 +182,23 @@ update msg model =
             )
 
         StartDrawing idx ->
-            ({ model | state = (turnOnAt idx model.state), drawing = True }
+            let
+                applyDraw = case model.drawMode of
+                    Paint -> turnOnAt
+                    Erase -> turnOffAt
+            in
+            ({ model | state = applyDraw idx model.state, drawing = True }
             , Cmd.none
             )
 
         DrawAt idx ->
             if model.drawing then
-                ({ model | state = turnOnAt idx model.state }
+                let
+                    applyDraw = case model.drawMode of
+                        Paint -> turnOnAt
+                        Erase -> turnOffAt
+                in
+                ({ model | state = applyDraw idx model.state }
                 , Cmd.none
                 )
             else
@@ -224,6 +242,16 @@ update msg model =
             , Cmd.none
             )
 
+        ToggleDrawMode ->
+            let
+                newMode = case model.drawMode of
+                    Paint -> Erase
+                    Erase -> Paint
+            in
+            ({ model | drawMode = newMode }
+            , Cmd.none
+            )
+
 
 zeroMatrix : Int -> List (List Int)
 zeroMatrix n =
@@ -253,6 +281,10 @@ toggleAt idx state =
 turnOnAt : Int -> List UnitState -> List UnitState
 turnOnAt idx state =
     List.indexedMap (\i b -> if i == idx then On else b) state
+
+turnOffAt : Int -> List UnitState -> List UnitState
+turnOffAt idx state =
+    List.indexedMap (\i b -> if i == idx then Off else b) state
 
 
 outerProduct : List Int -> List Int -> List (List Int)
@@ -400,35 +432,102 @@ thumbSizeFor gs =
 
 view : Model -> Html Msg
 view model =
-    div []
+    let
+        drawModeLabel =
+            case model.drawMode of
+                Paint -> "Paint"
+                Erase -> "Erase"
+    in
+    div
+        [ style "display" "flex"
+        , style "flex-direction" "column"
+        , style "align-items" "center"
+        , style "padding" "1em"
+        , style "font-family" "sans-serif"
+        ]
         [ viewGrid model.gridSize model.state
-        , button [ onClick UpdateRandomUnit ] [ text "Step" ]
-        , button [ onClick Clear ] [ text "Clear" ]
-        , button [ onClick Store ] [ text "Store" ]
-        , button [ onClick Play  ] [ text "Play"  ]
-        , button [ onClick Pause ] [ text "Pause" ]
-        , button [ onClick Xor   ] [ text "XOR"   ]
-        , button [ onClick FlipNBits ] [ text "FlipBits" ]
-        , button [ onClick SyncStep ] [ text "SyncStep" ]
-        , button [ onClick ClearMemories ] [ text "Clear Memories" ]
-        , div [ style "margin-top" "0.5em" ]
-            [ text "Grid size: "
+        , div
+            [ style "display" "flex"
+            , style "gap" "6px"
+            , style "margin-top" "10px"
+            , style "flex-wrap" "wrap"
+            , style "justify-content" "center"
+            ]
+            [ btn (Just ToggleDrawMode) drawModeLabel (model.drawMode == Erase)
+            , btn (Just Clear) "Clear" False
+            , btn (Just Xor) "Invert" False
+            , btn (Just FlipNBits) "Flip Bits" False
+            ]
+        , div
+            [ style "display" "flex"
+            , style "gap" "6px"
+            , style "margin-top" "6px"
+            , style "flex-wrap" "wrap"
+            , style "justify-content" "center"
+            ]
+            [ btn (Just Store) "Store" False
+            , btn (Just ClearMemories) "Clear Memories" False
+            ]
+        , div
+            [ style "display" "flex"
+            , style "gap" "6px"
+            , style "margin-top" "6px"
+            , style "flex-wrap" "wrap"
+            , style "justify-content" "center"
+            ]
+            [ btn (Just UpdateRandomUnit) "Step" False
+            , btn (Just SyncStep) "Sync Step" False
+            , btn (Just Play) "Play" model.playing
+            , btn (Just Pause) "Pause" False
+            ]
+        , div
+            [ style "display" "flex"
+            , style "gap" "4px"
+            , style "margin-top" "10px"
+            , style "align-items" "center"
+            ]
+            [ text "Grid: "
             , sizeButton small "10x10" model.gridSize
             , sizeButton medium "16x16" model.gridSize
             , sizeButton large "28x28" model.gridSize
             ]
-        , div [] [ text ("Memories: " ++ String.fromInt (List.length model.mems)) ]
+        , div [ style "margin-top" "10px" ]
+            [ text ("Memories: " ++ String.fromInt (List.length model.mems)) ]
         , viewMemories model.gridSize model.mems
         ]
 
 
+btn : Maybe Msg -> String -> Bool -> Html Msg
+btn msg label active =
+    let
+        handler =
+            case msg of
+                Just m -> [ onClick m ]
+                Nothing -> []
+
+        bgColor =
+            if active then "#4a90d9" else "#f0f0f0"
+
+        fgColor =
+            if active then "#fff" else "#333"
+    in
+    button
+        ( handler ++
+            [ style "padding" "6px 14px"
+            , style "border" "1px solid #ccc"
+            , style "border-radius" "4px"
+            , style "background" bgColor
+            , style "color" fgColor
+            , style "cursor" "pointer"
+            , style "font-size" "13px"
+            ]
+        )
+        [ text label ]
+
+
 sizeButton : GridSize -> String -> GridSize -> Html Msg
 sizeButton gs label current =
-    button
-        [ onClick (Resize gs)
-        , style "font-weight" (if gs == current then "bold" else "normal")
-        ]
-        [ text label ]
+    btn (Just (Resize gs)) label (gs == current)
 
 
 viewCell : String -> Int -> UnitState -> Html Msg
@@ -497,6 +596,8 @@ viewMemories gs mems =
       [ style "display" "flex"
       , style "gap" "8px"
       , style "margin-top" "1em"
+      , style "flex-wrap" "wrap"
+      , style "justify-content" "center"
       ]
       (List.indexedMap (viewMemory gs) mems)
 
@@ -519,6 +620,7 @@ viewMemory gs idx mem =
       [ style "border" "1px solid #ddd"
       , style "padding" "2px"
       , style "background" "#f9f9f9"
+      , style "cursor" "pointer"
       , onClick (Stamp idx)
       ]
       (List.map rowView rows)
