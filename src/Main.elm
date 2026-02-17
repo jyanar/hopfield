@@ -10,17 +10,30 @@ import Time
 import Platform.Cmd as Cmd
 
 
-numRows : Int
-numRows =
-    28
+type alias GridSize =
+    { rows : Int
+    , cols : Int
+    }
 
-numCols : Int
-numCols =
-    28
 
-numUnits : Int
-numUnits =
-    numRows * numCols
+small : GridSize
+small =
+    { rows = 10, cols = 10 }
+
+
+medium : GridSize
+medium =
+    { rows = 16, cols = 16 }
+
+
+large : GridSize
+large =
+    { rows = 28, cols = 28 }
+
+
+gridUnits : GridSize -> Int
+gridUnits gs =
+    gs.rows * gs.cols
 
 
 type UnitState
@@ -44,15 +57,21 @@ type alias Model =
     , mems : List (List UnitState)    -- List of memories
     , playing : Bool                  -- Whether to simulate the network forward
     , drawing : Bool                  -- Whether user is currently drawing
+    , gridSize : GridSize             -- Current grid dimensions
     }
 
 init : () -> (Model, Cmd Msg)
 init _ =
-    ( { state = List.repeat numUnits Off
-      , weights = zeroMatrix numUnits
+    let
+        gs = large
+        n = gridUnits gs
+    in
+    ( { state = List.repeat n Off
+      , weights = zeroMatrix n
       , mems = []
       , playing = False
       , drawing = False
+      , gridSize = gs
       }
     , Cmd.none
     )
@@ -76,6 +95,7 @@ type Msg
     | SyncStep
     | Stamp Int    -- Stamp memory i into the network state
     | ClearMemories
+    | Resize GridSize
 
 
 tickDt : Float
@@ -99,13 +119,13 @@ update msg model =
             )
 
         Clear ->
-            ({ model | state = List.repeat numUnits Off }
+            ({ model | state = List.repeat (gridUnits model.gridSize) Off }
             , Cmd.none
             )
 
         Store ->
-            ({ model | mems = model.state :: model.mems                    -- Add memory to list of memories
-                     , weights = updateWeights model.weights model.state } -- Update weight matrix
+            ({ model | mems = model.state :: model.mems
+                     , weights = updateWeights (gridUnits model.gridSize) model.weights model.state }
             , Cmd.none
             )
 
@@ -121,7 +141,7 @@ update msg model =
 
         UpdateRandomUnit ->
             ( model
-            , Random.generate UpdateAt (Random.int 0 (numUnits - 1))
+            , Random.generate UpdateAt (Random.int 0 (gridUnits model.gridSize - 1))
             )
 
         FlipAt idxs ->
@@ -130,8 +150,12 @@ update msg model =
             )
 
         FlipNBits ->
+            let
+                n = gridUnits model.gridSize
+                flipCount = max 1 (n * 30 // 784)
+            in
             ( model
-            , Random.generate FlipAt (Random.list 30 (Random.int 0 (numUnits - 1)))
+            , Random.generate FlipAt (Random.list flipCount (Random.int 0 (n - 1)))
             )
 
         Play ->
@@ -175,7 +199,7 @@ update msg model =
         Stamp idx ->
             let
                 mem = Maybe.withDefault
-                        (List.repeat numUnits Off)
+                        (List.repeat (gridUnits model.gridSize) Off)
                         (getAt idx model.mems)
             in
             ({ model | state = stampMemory mem model.state }
@@ -184,7 +208,19 @@ update msg model =
 
         ClearMemories ->
             ({ model | mems = []
-                     , weights = zeroMatrix numUnits }
+                     , weights = zeroMatrix (gridUnits model.gridSize) }
+            , Cmd.none
+            )
+
+        Resize gs ->
+            let
+                n = gridUnits gs
+            in
+            ({ model | state = List.repeat n Off
+                     , weights = zeroMatrix n
+                     , mems = []
+                     , playing = False
+                     , gridSize = gs }
             , Cmd.none
             )
 
@@ -270,13 +306,13 @@ S via Hebbian rule:
 
     T = T + \sum_{i,j} S_i * S_j
 -}
-updateWeights : List (List Int) -> List UnitState -> List (List Int)
-updateWeights weights state =
+updateWeights : Int -> List (List Int) -> List UnitState -> List (List Int)
+updateWeights n weights state =
     let
         deltaWeights = outerProduct (List.map toBipolar state) (List.map toBipolar state)
         summedWeights = List.map2 (+) (List.concat weights) (List.concat deltaWeights)
     in
-    setDiagZero (chunk numUnits summedWeights)
+    setDiagZero (chunk n summedWeights)
 
 
 {-| Given
@@ -352,15 +388,20 @@ chunk n xs =
 -- RENDERING
 
 
-cellSize : String
-cellSize =
-    "10px"
+cellSizeFor : GridSize -> String
+cellSizeFor gs =
+    String.fromInt (280 // gs.cols) ++ "px"
+
+
+thumbSizeFor : GridSize -> String
+thumbSizeFor gs =
+    String.fromInt (max 1 (84 // gs.cols)) ++ "px"
 
 
 view : Model -> Html Msg
 view model =
     div []
-        [ viewGrid model.state
+        [ viewGrid model.gridSize model.state
         , button [ onClick UpdateRandomUnit ] [ text "Step" ]
         , button [ onClick Clear ] [ text "Clear" ]
         , button [ onClick Store ] [ text "Store" ]
@@ -370,30 +411,36 @@ view model =
         , button [ onClick FlipNBits ] [ text "FlipBits" ]
         , button [ onClick SyncStep ] [ text "SyncStep" ]
         , button [ onClick ClearMemories ] [ text "Clear Memories" ]
+        , div [ style "margin-top" "0.5em" ]
+            [ text "Grid size: "
+            , sizeButton small "10x10" model.gridSize
+            , sizeButton medium "16x16" model.gridSize
+            , sizeButton large "28x28" model.gridSize
+            ]
         , div [] [ text ("Memories: " ++ String.fromInt (List.length model.mems)) ]
-        , viewMemories model.mems
-        -- , viewMatrix model.weights
-        -- , div [] [ text ("Length of state: " ++ String.fromInt (List.length model.state))]
-        -- , div [] [ text ("Length of mem[1]: " ++ String.fromInt (List.length (Maybe.withDefault [] (List.head model.mems))))]
-        -- , div [] [ text ("Mem 1: " ++ (model.mems
-        --     |> List.head
-        --     |> Maybe.withDefault []
-        --     |> toBipolar
-        --     |> List.map String.fromInt
-        --     |> String.concat))]
+        , viewMemories model.gridSize model.mems
         ]
 
 
-viewCell : Int -> UnitState -> Html Msg
-viewCell idx val =
+sizeButton : GridSize -> String -> GridSize -> Html Msg
+sizeButton gs label current =
+    button
+        [ onClick (Resize gs)
+        , style "font-weight" (if gs == current then "bold" else "normal")
+        ]
+        [ text label ]
+
+
+viewCell : String -> Int -> UnitState -> Html Msg
+viewCell size idx val =
     let
         bgColor = if val == On then "#000" else "#fff"
     in
     div
         [ attribute "draggable" "false"
         , style "user-select" "none"
-        , style "width" cellSize
-        , style "height" cellSize
+        , style "width" size
+        , style "height" size
         , style "border" "1px solid #ccc"
         , style "background-color" bgColor
         -- , style "cursor" "pointer"
@@ -406,12 +453,12 @@ viewCell idx val =
 
 
 
-viewGrid : List UnitState -> Html Msg
-viewGrid state =
+viewGrid : GridSize -> List UnitState -> Html Msg
+viewGrid gs state =
     div [ onMouseUp StopDrawing ]
         ( state
-            |> List.indexedMap viewCell
-            |> chunk numCols
+            |> List.indexedMap (viewCell (cellSizeFor gs))
+            |> chunk gs.cols
             |> List.map (\row -> div [ style "display" "flex" ] row)
         )
 
@@ -444,24 +491,24 @@ viewMatCell n =
 
 
 -- | Render the list of memories side by side
-viewMemories : List (List UnitState) -> Html Msg
-viewMemories mems =
+viewMemories : GridSize -> List (List UnitState) -> Html Msg
+viewMemories gs mems =
     div
       [ style "display" "flex"
       , style "gap" "8px"
       , style "margin-top" "1em"
       ]
-      (List.indexedMap viewMemory mems)
+      (List.indexedMap (viewMemory gs) mems)
 
 
 -- | Render one memory (a List of UnitState) as a tiny grid
-viewMemory : Int -> List UnitState -> Html Msg
-viewMemory idx mem =
+viewMemory : GridSize -> Int -> List UnitState -> Html Msg
+viewMemory gs idx mem =
     let
         thumbSize =
-            "3px"
+            thumbSizeFor gs
         rows =
-            chunk numCols mem
+            chunk gs.cols mem
 
         rowView : List UnitState -> Html Msg
         rowView rowStates =
