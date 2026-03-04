@@ -399,6 +399,30 @@ stampMemory mem state =
     List.map2 (\m s -> if m == On then On else s) mem state
 
 
+-- | Computes the Hopfield energy: E = -1/2 * sum_{i,j} T_{i,j} V_i V_j
+computeEnergy : List (List Int) -> List UnitState -> Float
+computeEnergy weights state =
+    let
+        v = List.map toBipolar state
+        total = List.map2 (\vi row -> vi * dotProduct row v) v weights |> List.sum
+    in
+    -0.5 * toFloat total
+
+
+-- | Formats an energy value for display. Since T and V are integers,
+-- energy is always a multiple of 0.5 so only one decimal place is needed.
+formatEnergy : Float -> String
+formatEnergy e =
+    let
+        doubled = round (e * 2)
+        sign = if doubled < 0 then "-" else ""
+        absDoubled = abs doubled
+        whole = absDoubled // 2
+        frac = if modBy 2 absDoubled == 1 then ".5" else ""
+    in
+    sign ++ String.fromInt whole ++ frac
+
+
 -- Chunk a list into sublists of length `n`.
 chunk : Int -> List a -> List (List a)
 chunk n xs =
@@ -493,7 +517,9 @@ view model =
             ]
         , div [ style "margin-top" "10px" ]
             [ text ("Memories: " ++ String.fromInt (List.length model.mems)) ]
-        , viewMemories model.gridSize model.mems
+        , div [ style "margin-top" "4px", style "font-size" "13px", style "color" "#555" ]
+            [ text ("E: " ++ formatEnergy (computeEnergy model.weights model.state)) ]
+        , viewMemories model.gridSize model.weights model.mems
         ]
 
 
@@ -590,8 +616,8 @@ viewMatCell n =
 
 
 -- | Render the list of memories side by side
-viewMemories : GridSize -> List (List UnitState) -> Html Msg
-viewMemories gs mems =
+viewMemories : GridSize -> List (List Int) -> List (List UnitState) -> Html Msg
+viewMemories gs weights mems =
     div
       [ style "display" "flex"
       , style "gap" "8px"
@@ -599,12 +625,12 @@ viewMemories gs mems =
       , style "flex-wrap" "wrap"
       , style "justify-content" "center"
       ]
-      (List.indexedMap (viewMemory gs) mems)
+      (List.indexedMap (viewMemory gs weights) mems)
 
 
 -- | Render one memory (a List of UnitState) as a tiny grid
-viewMemory : GridSize -> Int -> List UnitState -> Html Msg
-viewMemory gs idx mem =
+viewMemory : GridSize -> List (List Int) -> Int -> List UnitState -> Html Msg
+viewMemory gs weights idx mem =
     let
         thumbSize =
             thumbSizeFor gs
@@ -615,6 +641,9 @@ viewMemory gs idx mem =
         rowView rowStates =
             div [ style "display" "flex" ]
                 (List.map (viewMemoryCell thumbSize) rowStates)
+
+        energyLabel =
+            "E: " ++ formatEnergy (computeEnergy weights mem)
     in
     div
       [ style "border" "1px solid #ddd"
@@ -623,7 +652,16 @@ viewMemory gs idx mem =
       , style "cursor" "pointer"
       , onClick (Stamp idx)
       ]
-      (List.map rowView rows)
+      ( List.map rowView rows
+          ++ [ div
+                 [ style "text-align" "center"
+                 , style "font-size" "10px"
+                 , style "color" "#555"
+                 , style "margin-top" "2px"
+                 ]
+                 [ text energyLabel ]
+             ]
+      )
 
 
 -- | Render one “pixel” of a memory thumbnail
