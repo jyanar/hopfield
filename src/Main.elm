@@ -69,7 +69,7 @@ type alias Model =
 init : () -> (Model, Cmd Msg)
 init _ =
     let
-        gs = large
+        gs = medium
         n = gridUnits gs
     in
     ( { state = List.repeat n Off

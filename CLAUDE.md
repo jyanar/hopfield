@@ -1,96 +1,69 @@
 # CLAUDE.md
 
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
 ## Project Overview
 
-Hopfield is an interactive browser-based Hopfield neural network simulator written in [Elm](https://elm-lang.org/) (v0.19.1). It provides a 28x28 grid where users can draw patterns, store them as memories using Hebbian learning, and observe the network recall stored patterns through asynchronous or synchronous updates. The live app is deployed at https://yanar.org/hopfield.
+Hopfield is an interactive browser-based Hopfield neural network simulator written in [Elm](https://elm-lang.org/) (v0.19.1). It provides a resizable grid (10×10, 16×16, or 28×28) where users can draw patterns, store them as memories using Hebbian learning, and observe the network recall stored patterns through asynchronous or synchronous updates. The live app is deployed at https://yanar.org/hopfield.
 
 ## Repository Structure
 
-```
-hopfield/
-├── src/
-│   └── Main.elm          # Entire application (single module)
-├── .github/
-│   └── workflows/
-│       └── elm-to-gh-pages.yml  # CI/CD: build & deploy to GitHub Pages
-├── elm.json              # Elm project config and dependencies
-├── index.html            # HTML shell that mounts the Elm app
-├── .gitignore            # Ignores elm-stuff/
-└── README.md
-```
-
-This is a single-file Elm application. All logic — model, update, view, and helper functions — lives in `src/Main.elm`.
+This is a single-file Elm application. All logic — model, update, view, and helper functions — lives in `src/Main.elm`. The HTML shell is `index.html`.
 
 ## Build & Run
 
-### Prerequisites
-
-- [Elm](https://guide.elm-lang.org/install/elm.html) 0.19.1
-
-### Build
-
 ```sh
+# Build (produces main.js loaded by index.html)
 elm make src/Main.elm --output=main.js --optimize
-```
 
-This compiles `src/Main.elm` into `main.js`, which is loaded by `index.html`.
-
-### Run locally
-
-After building, open `index.html` in a browser. No dev server is required.
-
-### Elm Reactor (development)
-
-```sh
+# Development server (visit http://localhost:8000/src/Main.elm)
 elm reactor
 ```
 
-Then visit `http://localhost:8000/src/Main.elm` in a browser.
+After building, open `index.html` directly in a browser — no dev server required.
 
-## Testing
+## Testing & Formatting
 
-No test framework is configured. The `test-dependencies` in `elm.json` are empty. If tests are added, use [elm-test](https://github.com/elm-explorations/test).
-
-## Linting & Formatting
-
-No linting or formatting tools are configured. The standard tool for Elm formatting is [elm-format](https://github.com/avh4/elm-format).
+No test framework or linter is configured. Standard tools: [elm-test](https://github.com/elm-explorations/test) and [elm-format](https://github.com/avh4/elm-format).
 
 ## CI/CD
 
-GitHub Actions workflow (`.github/workflows/elm-to-gh-pages.yml`):
-- **Trigger**: Push to `main` branch (or manual `workflow_dispatch`)
-- **Steps**: Checkout → Install Elm 0.19.1 → Build → Deploy to GitHub Pages
-- **Concurrency**: One deployment at a time; queued runs wait (no cancellation of in-progress)
+GitHub Actions (`.github/workflows/elm-to-gh-pages.yml`) triggers on push to `main`: builds with Elm 0.19.1, deploys to GitHub Pages. One deployment at a time.
 
 ## Architecture
 
 The app follows **The Elm Architecture (TEA)**:
 
-### Model (`src/Main.elm:41-47`)
+### Model (`src/Main.elm:59-67`)
 
 ```elm
 type alias Model =
-    { state   : List UnitState        -- 784 neurons (28×28), each On or Off
-    , weights : List (List Int)       -- 784×784 weight matrix
-    , mems    : List (List UnitState) -- stored memory patterns
-    , playing : Bool                  -- simulation auto-running
-    , drawing : Bool                  -- user dragging to draw
+    { state    : List UnitState        -- N neurons, each On or Off
+    , weights  : List (List Int)       -- N×N weight matrix
+    , mems     : List (List UnitState) -- stored memory patterns
+    , playing  : Bool                  -- simulation auto-running
+    , drawing  : Bool                  -- user dragging to draw
+    , drawMode : DrawMode              -- Paint (turn On) or Erase (turn Off)
+    , gridSize : GridSize              -- current grid dimensions {rows, cols}
     }
 ```
 
 ### Key Types
 
 - `UnitState` — `On | Off` enum for neuron activation
-- `Msg` — union type with all user interactions and system events (defined at line 62)
+- `DrawMode` — `Paint | Erase` controls whether mouse drag turns cells on or off
+- `GridSize` — `{ rows : Int, cols : Int }`; predefined sizes: `small` (10×10), `medium` (16×16), `large` (28×28)
+- `Msg` — union type with all user interactions and system events (`src/Main.elm:87`)
 
 ### Core Algorithms (`src/Main.elm`)
 
 | Function | Line | Description |
 |---|---|---|
-| `updateWeights` | 273 | Hebbian learning: `T = T + S_i * S_j` (outer product, zero diagonal) |
-| `updateAsync` | 292 | Asynchronous update: recompute one unit via `sign(dot(row, state))` |
-| `updateSync` | 312 | Synchronous update: recompute all units simultaneously |
-| `stampMemory` | 329 | Overlay a stored memory's On-pixels onto current state |
+| `updateWeights` | 341 | Hebbian learning: `T = T + S_i * S_j` (outer product, zero diagonal) |
+| `updateAsync` | 360 | Asynchronous update: recompute one unit via `sign(dot(row, state))` |
+| `updateSync` | 381 | Synchronous update: recompute all units simultaneously |
+| `stampMemory` | 397 | Overlay a stored memory's On-pixels onto current state |
+| `computeEnergy` | 403 | Hopfield energy: `E = -0.5 * Σ T_ij V_i V_j` |
 
 ### Representation
 
@@ -99,18 +72,20 @@ type alias Model =
 
 ### Constants
 
-- Grid: 28 rows × 28 columns = 784 units
-- Tick interval: 17ms (~60 FPS) when playing
-- Cell size: 10px (grid), 3px (memory thumbnails)
+- Grid: N = `rows × cols` units; N varies with `gridSize` (100, 256, or 784)
+- Cell size: `280 // cols` px (scales with grid size)
+- Memory thumbnail size: `84 // cols` px
+- Tick interval: 17ms (~60 FPS) when playing; fires `UpdateRandomUnit` → `UpdateAt i` (random `i`)
+- `FlipNBits` flips `max 1 (N * 30 // 784)` bits — proportional to grid size
 
 ## Key Conventions
 
 - **Pure functional style** — no ports, no JS interop, no effects beyond random number generation
 - **Single module** — all code in `Main.elm`, exposed only `main`
 - **Inline CSS** — styling via `Html.Attributes.style`, no external CSS files
-- **List-based matrices** — weight matrix and state are plain `List` types (no Array)
-- **Helper functions** — utility functions like `chunk`, `getAt`, `replaceAt`, `dotProduct` are defined locally
-- **Haskell-style doc comments** — some functions use `-- |` prefix for documentation
+- **List-based matrices** — weight matrix and state are plain `List` types (no `Array`)
+- **Helper functions** — `chunk`, `getAt`, `replaceAt`, `dotProduct` defined locally
+- **Haskell-style doc comments** — some functions use `-- |` prefix
 
 ## Dependencies
 
